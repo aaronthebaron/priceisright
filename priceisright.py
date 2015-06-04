@@ -1,5 +1,6 @@
 import urllib
 import json
+import time
 from aws_parser import demand_jsonptojson, spot_jsonptojson
 from flask import Flask, render_template
 app = Flask(__name__)
@@ -19,7 +20,6 @@ class Region:
             total_price = total_price + float(instance.price_per_vcpu)
 
         self.mean_price = total_price / len(self.instances)
-        print(self.mean_price)
 
     def calculate_instance_price_spreads(self):
         spot_instances = [i for i in self.instances if i.spot == True]
@@ -59,12 +59,14 @@ class Instance:
         return 'Instance(region={}, generation={}, name={}, os={}, vcpu={}, price={}, price_per_vcpu={}, spot={}, demand={})'.format(self.region, self.generation, self.name, self.os, self.vcpu, self.price, self.price_per_vcpu, self.spot, self.demand)
 
 class EC2Assets:
+    """Main container class for all the EC2 assests we're examining."""
     def __init__(self):
         self.vcpu_dict = {}
         self.instances = []
         self.regions = []
 
     def get_region(self, region):
+        """Get a region object from the list by name, or add it."""
         region_obj = None
         for reg in self.regions:
             if reg.region == region:
@@ -73,11 +75,12 @@ class EC2Assets:
         if region_obj:
             return region_obj
         else:
-            r = Region(region=region)
-            self.regions.append(r)
-            return r 
+            region_obj = Region(region=region)
+            self.regions.append(region_obj)
+            return region_obj 
 
     def add_demand_instances(self, url):
+        """Parse the demand instances JSON and load it into the list of objects"""
         try:
             response = urllib.request.urlopen(url);
         except:
@@ -88,7 +91,6 @@ class EC2Assets:
         demand_json = demand_jsonptojson(demand_json)
         data = json.loads(demand_json)
         for region in data['config']['regions']:
-            print(region['region'])
             region_obj = self.get_region(region['region'])
             for inst_type in region['instanceTypes']: 
                 generation = inst_type['type']
@@ -103,13 +105,12 @@ class EC2Assets:
                         price = value['prices']['USD']
                         price_per_vcpu = float(price) / float(vcpu)
                         inst = Instance(region=region['region'], generation=generation, name=name, os=value['name'], vcpu=vcpu, price=price, price_per_vcpu=price_per_vcpu, spot=False, demand=True)
-                        if region['region'] == "apac-tokyo":
-                            print(inst)
                         region_obj.instances.append(inst)
                         self.instances.append(inst)
 
 
     def add_spot_instances(self, url):
+        """Parse the spot instances JSON and load it into the list of objects"""
         try:
             response = urllib.request.urlopen(url);
         except:
@@ -138,6 +139,7 @@ class EC2Assets:
 
 
     def legacy_dict_fill(self, url):
+        """Legacy systems vCPU numbers are not in the spot list, so using the demand list to fill a dict for use by spot loader"""
         try:
             response = urllib.request.urlopen(url);
         except:
@@ -170,6 +172,8 @@ class EC2Assets:
         cheaps = sorted(self.instances, key=lambda instance: instance.price_per_vcpu, reverse=True)
         return cheaps[0:limit-1]
             
+
+
 def load_data(aws, again=False):
     if again:
         del aws
