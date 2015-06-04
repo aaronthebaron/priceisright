@@ -2,7 +2,7 @@
 
 ### Installation:
 
-    Get yourself a virtualenv
+    Get yourself ~~to Mars~~ a virtualenv
     pip install -r requirements.txt
     python priceisright.py
 
