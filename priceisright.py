@@ -21,6 +21,29 @@ class Region:
         self.mean_price = total_price / len(self.instances)
         print(self.mean_price)
 
+    def calculate_instance_price_spreads(self):
+        spot_instances = [i for i in self.instances if i.spot == True]
+        demand_instances = [i for i in self.instances if i.demand == True]
+        spreads = {}
+        for spot_instance in spot_instances:
+            spot_price = float(spot_instance.price_per_vcpu)
+            spot_name = spot_instance.name
+            for demand_instance in demand_instances:
+                if demand_instance.name == spot_name:
+                    demand_price = float(demand_instance.price_per_vcpu)
+                    if demand_price < spot_price:
+                        print(spot_instance)
+                        print(demand_instance)
+                    else:
+                        spread = demand_price - spot_price
+                        spreads[spot_name] = spread
+                    break
+                else:
+                    continue
+
+        return spreads
+
+
 class Instance:
     def __init__(self, region, generation, name, os, vcpu, price, price_per_vcpu, spot, demand):
         self.region = region
@@ -65,6 +88,7 @@ class EC2Assets:
         demand_json = demand_jsonptojson(demand_json)
         data = json.loads(demand_json)
         for region in data['config']['regions']:
+            print(region['region'])
             region_obj = self.get_region(region['region'])
             for inst_type in region['instanceTypes']: 
                 generation = inst_type['type']
@@ -79,6 +103,8 @@ class EC2Assets:
                         price = value['prices']['USD']
                         price_per_vcpu = float(price) / float(vcpu)
                         inst = Instance(region=region['region'], generation=generation, name=name, os=value['name'], vcpu=vcpu, price=price, price_per_vcpu=price_per_vcpu, spot=False, demand=True)
+                        if region['region'] == "apac-tokyo":
+                            print(inst)
                         region_obj.instances.append(inst)
                         self.instances.append(inst)
 
@@ -144,32 +170,51 @@ class EC2Assets:
         cheaps = sorted(self.instances, key=lambda instance: instance.price_per_vcpu, reverse=True)
         return cheaps[0:limit-1]
             
-def load_data(aws):
+def load_data(aws, again=False):
+    if again:
+        del aws
+        aws = EC2Assets()
     aws.legacy_dict_fill(url='http://a0.awsstatic.com/pricing/1/ec2/previous-generation/linux-od.min.js')
     aws.add_demand_instances(url='http://a0.awsstatic.com/pricing/1/ec2/linux-od.min.js')
     aws.add_spot_instances(url='http://spot-price.s3.amazonaws.com/spot.js')
     aws.update_regions_price()
 
+@app.route('/reload')   #Thinking this could be a celery task, but for the sake of time...
+def reload_data():
+    load_data(aws, again=True)
+    return 'Reloaded'
+
 @app.route('/price_spread')
 def price_spread():
-    return 'Price Spread'
+    spread_json = '{ "regions": ['
+    for index, region in enumerate(aws.regions):
+        spreads = region.calculate_instance_price_spreads()
+        if spreads == {}:
+            spread_json = '{}, {{ "region":"{}", "instance_spreads": null }}'.format(spread_json, region.region)
+            continue
+        if index == 0:
+            spread_json = '{} {{ "region":"{}", "instance_spreads": {} }}'.format(spread_json, region.region, json.dumps(spreads))
+        else:
+            spread_json = '{}, {{ "region":"{}", "instance_spreads": {} }}'.format(spread_json, region.region, json.dumps(spreads))
+    spread_json = '{}] }}'.format(spread_json)
+    return spread_json
 
 @app.route('/cheapest')
 def bottom_ten():
     ten_cheap = aws.find_cheapest(10)
-    cheap_json = "{{ \"cheapest\": {} }}".format(json.dumps(ten_cheap, default=lambda o: o.__dict__))
+    cheap_json = '{{ "cheapest": {} }}'.format(json.dumps(ten_cheap, default=lambda o: o.__dict__))
     return cheap_json
 
 @app.route('/most_expensive')
 def top_ten():
     ten_expensive = aws.find_most_expensive(10)
-    expensive_json = "{{ \"most_expensive\": {} }}".format(json.dumps(ten_expensive, default=lambda o: o.__dict__))
+    expensive_json = '{{ "most_expensive": {} }}'.format(json.dumps(ten_expensive, default=lambda o: o.__dict__))
     return expensive_json
 
 @app.route('/cheapest_region')
 def cheapest_region():
     cheap_region = aws.find_cheapest_region()
-    cheapest_region_json = "{{ \"cheapest_region\": {} }}".format(json.dumps(cheap_region, default=lambda o: o.__dict__))
+    cheapest_region_json = '{{ "cheapest_region": {} }}'.format(json.dumps(cheap_region, default=lambda o: o.__dict__))
     return cheapest_region_json
 
 @app.route('/')
