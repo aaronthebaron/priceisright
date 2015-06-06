@@ -5,6 +5,13 @@ from aws_parser import demand_jsonptojson, spot_jsonptojson
 from flask import Flask, render_template
 app = Flask(__name__)
 
+region_lookup = {
+    'apac-tokyo': 'ap-northeast-1',
+    'apac-sin': 'ap-southeast-1',
+    'apac-syd': 'ap-southeast-2',
+    'eu-ireland': 'eu-west-1'
+}
+
 class Region:
     def __init__(self, region):
         self.region = region
@@ -68,6 +75,9 @@ class EC2Assets:
     def get_region(self, region):
         """Get a region object from the list by name, or add it."""
         region_obj = None
+        if region in region_lookup:
+            region = region_lookup[region]
+
         for reg in self.regions:
             if reg.region == region:
                 region_obj = reg
